@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #F7F5F0;
+  --surface: #FFFFFF;
+  --primary-text: #252A25;
+  --secondary-text: #85877F;
+  --accent: #66836B;
+  --accent-bg: #EAF0E9;
+  --border: #E9E7E0;
+}
+
+body {
+  background-color: var(--background);
+  color: var(--primary-text);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom editorial selection */
+::selection {
+  background-color: #EAF0E9;
+  color: #252A25;
+}

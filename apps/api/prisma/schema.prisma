@@ -1,0 +1,285 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+/// Minimal system health check entity for database verification
+model HealthCheck {
+  id        String   @id @default(uuid())
+  status    String   @default("ok")
+  checkedAt DateTime @default(now()) @map("checked_at")
+
+  @@map("health_checks")
+}
+
+/// Authenticated user account entity
+model User {
+  id                String               @id @default(uuid())
+  name              String
+  email             String               @unique
+  passwordHash      String               @map("password_hash")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+  savedDestinations SavedDestination[]
+  trips             Trip[]
+  tripMemberships   TripMember[]
+  sentInvitations   TripInvitation[]     @relation("TripInvitationsSent")
+  suggestions       ActivitySuggestion[] @relation("UserSuggestions")
+  votes             SuggestionVote[]
+  paidExpenses      Expense[]            @relation("UserPaidExpenses")
+  expenseSplits     ExpenseSplit[]
+
+  @@map("users")
+}
+
+/// Curated travel destination entity
+model Destination {
+  id                  String             @id @default(uuid())
+  name                String
+  slug                String             @unique
+  city                String
+  country             String
+  shortDescription    String             @map("short_description")
+  detailedDescription String             @map("detailed_description") @db.Text
+  category            String
+  coverImage          String             @map("cover_image")
+  galleryImages       String[]           @map("gallery_images")
+  attractions         String[]
+  bestTimeToVisit     String             @map("best_time_to_visit")
+  approximateDuration String             @map("approximate_duration")
+  isFeatured          Boolean            @default(false) @map("is_featured")
+  latitude            Float?             @map("latitude")
+  longitude           Float?             @map("longitude")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  updatedAt           DateTime           @updatedAt @map("updated_at")
+
+  savedBy             SavedDestination[]
+  trips               Trip[]
+
+  @@index([category])
+  @@index([isFeatured])
+  @@index([name])
+  @@index([city])
+  @@index([country])
+  @@map("destinations")
+}
+
+/// Saved destination join entity for user wishlists
+model SavedDestination {
+  id            String      @id @default(uuid())
+  userId        String      @map("user_id")
+  destinationId String      @map("destination_id")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  destination   Destination @relation(fields: [destinationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, destinationId])
+  @@index([userId])
+  @@index([destinationId])
+  @@map("saved_destinations")
+}
+
+/// Trip planning entity
+model Trip {
+  id                  String               @id @default(uuid())
+  userId              String               @map("user_id")
+  destinationId       String               @map("destination_id")
+  title               String
+  description         String?              @db.Text
+  startDate           DateTime             @map("start_date")
+  endDate             DateTime             @map("end_date")
+  travelerCount       Int                  @default(1) @map("traveler_count")
+  budgetAmount        Decimal?             @map("budget_amount") @db.Decimal(12, 2)
+  currency            String               @default("INR")
+  coverImage          String?              @map("cover_image")
+  status              String               @default("UPCOMING")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  user                User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  destination         Destination          @relation(fields: [destinationId], references: [id], onDelete: Restrict)
+  itineraryDays       ItineraryDay[]
+  members             TripMember[]
+  invitations         TripInvitation[]
+  activitySuggestions ActivitySuggestion[]
+  expenses            Expense[]
+
+  @@index([userId])
+  @@index([destinationId])
+  @@index([startDate, endDate])
+  @@map("trips")
+}
+
+/// Trip member association with role
+model TripMember {
+  id       String   @id @default(uuid())
+  tripId   String   @map("trip_id")
+  userId   String   @map("user_id")
+  role     String   @default("MEMBER") // "OWNER" | "MEMBER"
+  joinedAt DateTime @default(now()) @map("joined_at")
+
+  trip     Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, userId])
+  @@index([tripId])
+  @@index([userId])
+  @@map("trip_members")
+}
+
+/// Trip invitation entity
+model TripInvitation {
+  id        String   @id @default(uuid())
+  tripId    String   @map("trip_id")
+  inviterId String   @map("inviter_id")
+  email     String
+  tokenHash String   @map("token_hash")
+  status    String   @default("PENDING") // "PENDING" | "ACCEPTED" | "DECLINED" | "EXPIRED"
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  trip      Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  inviter   User     @relation("TripInvitationsSent", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([inviterId])
+  @@index([tokenHash])
+  @@index([email])
+  @@index([tripId, email, status])
+  @@map("trip_invitations")
+}
+
+/// Itinerary day within a trip
+model ItineraryDay {
+  id          String               @id @default(uuid())
+  tripId      String               @map("trip_id")
+  date        DateTime
+  dayNumber   Int                  @map("day_number")
+  title       String?
+  notes       String?              @db.Text
+  createdAt   DateTime             @default(now()) @map("created_at")
+  updatedAt   DateTime             @updatedAt @map("updated_at")
+
+  trip        Trip                 @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  activities  Activity[]
+  suggestions ActivitySuggestion[]
+
+  @@unique([tripId, dayNumber])
+  @@unique([tripId, date])
+  @@index([tripId])
+  @@map("itinerary_days")
+}
+
+/// Planned activity within an itinerary day
+model Activity {
+  id              String       @id @default(uuid())
+  itineraryDayId  String       @map("itinerary_day_id")
+  title           String
+  description     String?      @db.Text
+  location        String?
+  latitude        Float?       @map("latitude")
+  longitude       Float?       @map("longitude")
+  startTime       String?      @map("start_time")
+  durationMinutes Int?         @map("duration_minutes")
+  notes           String?      @db.Text
+  sortOrder       Int          @default(0) @map("sort_order")
+  isCompleted     Boolean      @default(false) @map("is_completed")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  itineraryDay    ItineraryDay @relation(fields: [itineraryDayId], references: [id], onDelete: Cascade)
+
+  @@index([itineraryDayId])
+  @@index([itineraryDayId, sortOrder])
+  @@map("activities")
+}
+
+/// Activity suggestion for an itinerary day
+model ActivitySuggestion {
+  id              String           @id @default(uuid())
+  tripId          String           @map("trip_id")
+  itineraryDayId  String           @map("itinerary_day_id")
+  suggestedById   String           @map("suggested_by_id")
+  title           String
+  description     String?          @db.Text
+  location        String?
+  latitude        Float?           @map("latitude")
+  longitude       Float?           @map("longitude")
+  startTime       String?          @map("start_time")
+  durationMinutes Int?             @map("duration_minutes")
+  status          String           @default("PENDING") // "PENDING" | "APPROVED" | "REJECTED"
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  trip            Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  itineraryDay    ItineraryDay     @relation(fields: [itineraryDayId], references: [id], onDelete: Cascade)
+  suggestedBy     User             @relation("UserSuggestions", fields: [suggestedById], references: [id], onDelete: Cascade)
+  votes           SuggestionVote[]
+
+  @@index([tripId])
+  @@index([itineraryDayId])
+  @@index([suggestedById])
+  @@map("activity_suggestions")
+}
+
+/// Suggestion vote join entity
+model SuggestionVote {
+  id           String             @id @default(uuid())
+  suggestionId String             @map("suggestion_id")
+  userId       String             @map("user_id")
+  createdAt    DateTime           @default(now()) @map("created_at")
+
+  suggestion   ActivitySuggestion @relation(fields: [suggestionId], references: [id], onDelete: Cascade)
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([suggestionId, userId])
+  @@index([suggestionId])
+  @@index([userId])
+  @@map("suggestion_votes")
+}
+
+/// Shared travel expense entity
+model Expense {
+  id          String         @id @default(uuid())
+  tripId      String         @map("trip_id")
+  paidById    String         @map("paid_by_id")
+  title       String
+  description String?        @db.Text
+  category    String // "Accommodation" | "Food & Drinks" | "Transport" | "Activities" | "Shopping" | "Other"
+  amount      Decimal        @db.Decimal(12, 2)
+  currency    String         @default("INR")
+  expenseDate DateTime       @map("expense_date")
+  splitMethod String         @default("EQUAL") @map("split_method") // "EQUAL" | "CUSTOM"
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  trip        Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidBy      User           @relation("UserPaidExpenses", fields: [paidById], references: [id], onDelete: Cascade)
+  splits      ExpenseSplit[]
+
+  @@index([tripId])
+  @@index([paidById])
+  @@index([expenseDate])
+  @@map("expenses")
+}
+
+/// Individual expense split share
+model ExpenseSplit {
+  id        String   @id @default(uuid())
+  expenseId String   @map("expense_id")
+  userId    String   @map("user_id")
+  amount    Decimal  @db.Decimal(12, 2)
+
+  expense   Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, userId])
+  @@index([expenseId])
+  @@index([userId])
+  @@map("expense_splits")
+}

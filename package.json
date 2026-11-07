@@ -1,0 +1,28 @@
+{
+  "name": "tripnest",
+  "version": "1.0.0",
+  "private": true,
+  "packageManager": "npm@11.6.2",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
+    "clean": "turbo run clean && rimraf node_modules",
+    "db:generate": "npm run --workspace=@tripnest/api prisma:generate",
+    "db:migrate": "npm run --workspace=@tripnest/api prisma:migrate",
+    "db:studio": "npm run --workspace=@tripnest/api prisma:studio",
+    "db:seed": "npm run --workspace=@tripnest/api prisma:seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "rimraf": "^5.0.5",
+    "turbo": "^2.11.10"
+  }
+}
