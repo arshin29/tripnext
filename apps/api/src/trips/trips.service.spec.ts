@@ -152,10 +152,9 @@ describe('TripsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('should create trip and generate day-by-day itinerary in a transaction', async () => {
+    it('should create trip and generate day-by-day itinerary via atomic nested write', async () => {
       prisma.destination.findUnique.mockResolvedValue(mockDestination);
-      prisma.trip.create.mockResolvedValue({ id: 'trip-1' });
-      prisma.trip.findUniqueOrThrow.mockResolvedValue(mockTrip);
+      prisma.trip.create.mockResolvedValue(mockTrip);
 
       const result = await service.createTrip('user-1', {
         destinationId: 'dest-1',
@@ -167,12 +166,27 @@ describe('TripsService', () => {
         currency: 'INR',
       });
 
-      expect(prisma.$transaction).toHaveBeenCalled();
-      expect(prisma.itineraryDay.createMany).toHaveBeenCalledWith({
-        data: expect.arrayContaining([
-          expect.objectContaining({ tripId: 'trip-1', dayNumber: 1 }),
-          expect.objectContaining({ tripId: 'trip-1', dayNumber: 5 }),
-        ]),
+      expect(prisma.trip.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          userId: 'user-1',
+          destinationId: 'dest-1',
+          title: 'Kyoto Summer Retreat',
+          travelerCount: 2,
+          currency: 'INR',
+          members: {
+            create: {
+              userId: 'user-1',
+              role: 'OWNER',
+            },
+          },
+          itineraryDays: {
+            create: expect.arrayContaining([
+              expect.objectContaining({ dayNumber: 1, title: 'Day 1' }),
+              expect.objectContaining({ dayNumber: 5, title: 'Day 5' }),
+            ]),
+          },
+        }),
+        include: expect.any(Object),
       });
       expect(result.id).toBe('trip-1');
       expect(result.budgetAmount).toBe(150000);

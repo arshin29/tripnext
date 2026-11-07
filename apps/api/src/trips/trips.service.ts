@@ -298,65 +298,57 @@ export class TripsService {
 
     const coverImage = dto.coverImage || destination.coverImage;
 
-    // Use transaction to create trip, initial itinerary days, and trip_members entry atomically
-    const createdTrip = await this.prisma.$transaction(async (tx) => {
-      const trip = await tx.trip.create({
-        data: {
-          userId,
-          destinationId: dto.destinationId,
-          title: dto.title.trim(),
-          description: dto.description?.trim(),
-          startDate,
-          endDate,
-          travelerCount: dto.travelerCount || 1,
-          budgetAmount:
-            dto.budgetAmount !== undefined ? new Prisma.Decimal(dto.budgetAmount) : null,
-          currency: dto.currency || 'INR',
-          coverImage,
-          status: this.computeTripStatus(startDate, endDate),
-          members: {
-            create: {
-              userId,
-              role: 'OWNER',
+    // Generate day records
+    const daysData = [];
+    for (let i = 0; i < dayCount; i++) {
+      const dayDate = new Date(startDate.getTime() + i * msPerDay);
+      daysData.push({
+        dayNumber: i + 1,
+        date: dayDate,
+        title: `Day ${i + 1}`,
+      });
+    }
+
+    // Atomic nested write: creates trip, initial itinerary days, and OWNER trip member in a single operation
+    const createdTrip = await this.prisma.trip.create({
+      data: {
+        userId,
+        destinationId: dto.destinationId,
+        title: dto.title.trim(),
+        description: dto.description?.trim(),
+        startDate,
+        endDate,
+        travelerCount: dto.travelerCount || 1,
+        budgetAmount:
+          dto.budgetAmount !== undefined ? new Prisma.Decimal(dto.budgetAmount) : null,
+        currency: dto.currency || 'INR',
+        coverImage,
+        status: this.computeTripStatus(startDate, endDate),
+        members: {
+          create: {
+            userId,
+            role: 'OWNER',
+          },
+        },
+        itineraryDays: {
+          create: daysData,
+        },
+      },
+      include: {
+        destination: true,
+        user: true,
+        members: {
+          include: { user: true },
+        },
+        itineraryDays: {
+          orderBy: { dayNumber: 'asc' },
+          include: {
+            activities: {
+              orderBy: { sortOrder: 'asc' },
             },
           },
         },
-      });
-
-      // Generate day records
-      const daysData = [];
-      for (let i = 0; i < dayCount; i++) {
-        const dayDate = new Date(startDate.getTime() + i * msPerDay);
-        daysData.push({
-          tripId: trip.id,
-          dayNumber: i + 1,
-          date: dayDate,
-          title: `Day ${i + 1}`,
-        });
-      }
-
-      await tx.itineraryDay.createMany({
-        data: daysData,
-      });
-
-      return tx.trip.findUniqueOrThrow({
-        where: { id: trip.id },
-        include: {
-          destination: true,
-          user: true,
-          members: {
-            include: { user: true },
-          },
-          itineraryDays: {
-            orderBy: { dayNumber: 'asc' },
-            include: {
-              activities: {
-                orderBy: { sortOrder: 'asc' },
-              },
-            },
-          },
-        },
-      });
+      },
     });
 
     return this.toTrip(createdTrip, userId);
