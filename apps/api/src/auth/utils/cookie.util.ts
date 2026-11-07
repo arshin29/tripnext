@@ -5,7 +5,7 @@ export function getAuthCookieOptions(isProduction: boolean): CookieOptions {
   return {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: isProduction ? 'none' : 'lax',
     path: '/',
     maxAge: AUTH_COOKIE_MAX_AGE_MS,
   };
@@ -19,7 +19,7 @@ export function clearAuthCookie(res: Response, isProduction: boolean): void {
   res.clearCookie(AUTH_COOKIE_NAME, {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax',
+    sameSite: isProduction ? 'none' : 'lax',
     path: '/',
   });
 }
