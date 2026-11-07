@@ -15,6 +15,7 @@
     "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,js,json,md}\"",
     "clean": "turbo run clean && rimraf node_modules",
+    "postinstall": "npm run db:generate",
     "db:generate": "npm run --workspace=@tripnest/api prisma:generate",
     "db:migrate": "npm run --workspace=@tripnest/api prisma:migrate",
     "db:studio": "npm run --workspace=@tripnest/api prisma:studio",
