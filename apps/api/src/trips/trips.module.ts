@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module';
+import { GeocodingModule } from '../geocoding/geocoding.module';
 import { PrismaModule } from '../prisma/prisma.module';
 import { CollaborationService } from './collaboration.service';
 import { ExpensesController } from './expenses.controller';
@@ -11,7 +12,7 @@ import { TripsController } from './trips.controller';
 import { TripsService } from './trips.service';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, GeocodingModule],
   controllers: [TripsController, InvitationsController, ExpensesController],
   providers: [
     TripsService,

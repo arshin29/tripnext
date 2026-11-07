@@ -13,12 +13,14 @@ import {
   UpdateItineraryDayDto,
 } from './dto';
 import { TripsService } from './trips.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
 
 @Injectable()
 export class ItineraryService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly tripsService: TripsService,
+    private readonly geocodingService: GeocodingService,
   ) {}
 
   /**
@@ -242,7 +244,7 @@ export class ItineraryService {
     tripId: string,
     dto: CreateActivityDto,
   ): Promise<Activity> {
-    await this.tripsService.validateTripAccess(userId, tripId);
+    const { trip } = await this.tripsService.validateTripAccess(userId, tripId);
 
     const day = await this.prisma.itineraryDay.findFirst({
       where: { id: dto.itineraryDayId, tripId },
@@ -272,14 +274,42 @@ export class ItineraryService {
       );
     }
 
+    let lat = dto.latitude;
+    let lng = dto.longitude;
+
+    // Automatic geocoding if coordinates are omitted but a usable location/title exists
+    if (lat === undefined && lng === undefined && (dto.location?.trim() || dto.title.trim())) {
+      const destinationHint = [trip?.destination?.city, trip?.destination?.country]
+        .filter(Boolean)
+        .join(', ');
+      const query = dto.location?.trim() || dto.title.trim();
+      try {
+        let results = await this.geocodingService.geocode(query, destinationHint);
+        if (
+          results.length === 0 &&
+          dto.location?.trim() &&
+          dto.title?.trim() &&
+          dto.location.trim().toLowerCase() !== dto.title.trim().toLowerCase()
+        ) {
+          results = await this.geocodingService.geocode(dto.title.trim(), destinationHint);
+        }
+        if (results.length > 0) {
+          lat = results[0].latitude;
+          lng = results[0].longitude;
+        }
+      } catch {
+        // Fallback gracefully without throwing
+      }
+    }
+
     const activity = await this.prisma.activity.create({
       data: {
         itineraryDayId: dto.itineraryDayId,
         title: dto.title.trim(),
         description: dto.description?.trim(),
         location: dto.location?.trim(),
-        latitude: dto.latitude,
-        longitude: dto.longitude,
+        latitude: lat,
+        longitude: lng,
         startTime: dto.startTime?.trim(),
         durationMinutes: dto.durationMinutes,
         notes: dto.notes?.trim(),
@@ -289,6 +319,81 @@ export class ItineraryService {
     });
 
     return this.toActivity(activity);
+  }
+
+  /**
+   * Safe, authenticated, and idempotent batch resolution of missing coordinates
+   * for existing activities in a trip.
+   */
+  async geocodeUnmappedActivities(
+    userId: string,
+    tripId: string,
+  ): Promise<{
+    resolvedCount: number;
+    unmappedCount: number;
+    activities: Activity[];
+  }> {
+    const { trip } = await this.tripsService.validateTripAccess(userId, tripId);
+
+    const days = await this.prisma.itineraryDay.findMany({
+      where: { tripId },
+      include: {
+        activities: {
+          orderBy: { sortOrder: 'asc' },
+        },
+      },
+      orderBy: { dayNumber: 'asc' },
+    });
+
+    const unmapped = days
+      .flatMap((d) => d.activities)
+      .filter((a) => a.latitude === null || a.longitude === null);
+
+    if (unmapped.length === 0) {
+      return { resolvedCount: 0, unmappedCount: 0, activities: [] };
+    }
+
+    const destinationHint = [trip.destination?.city, trip.destination?.country]
+      .filter(Boolean)
+      .join(', ');
+
+    const resolvedActivities: Activity[] = [];
+
+    for (const act of unmapped) {
+      const query = act.location?.trim() || act.title.trim();
+      if (!query) continue;
+
+      try {
+        let results = await this.geocodingService.geocode(query, destinationHint);
+        if (
+          results.length === 0 &&
+          act.location?.trim() &&
+          act.title.trim() &&
+          act.location.trim().toLowerCase() !== act.title.trim().toLowerCase()
+        ) {
+          results = await this.geocodingService.geocode(act.title.trim(), destinationHint);
+        }
+
+        if (results.length > 0) {
+          const updated = await this.prisma.activity.update({
+            where: { id: act.id },
+            data: {
+              latitude: results[0].latitude,
+              longitude: results[0].longitude,
+            },
+          });
+          resolvedActivities.push(this.toActivity(updated));
+        }
+      } catch {
+        // Graceful error handling per activity
+      }
+    }
+
+    return {
+      resolvedCount: resolvedActivities.length,
+      unmappedCount: unmapped.length - resolvedActivities.length,
+      activities: resolvedActivities,
+    };
   }
 
   /**

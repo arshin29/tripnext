@@ -14,7 +14,7 @@ import {
   SafeUser,
   UpdateProfileInput,
 } from '@tripnest/shared';
-import { apiClient, ApiError } from '../lib/api-client';
+import { apiClient, ApiError, clearClientCache } from '../lib/api-client';
 
 interface AuthContextType {
   user: SafeUser | null;
@@ -42,10 +42,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.data?.user) {
         setUser(res.data.user);
       } else {
+        clearClientCache();
         setUser(null);
       }
     } catch {
       // 401 or network error — session not present or expired
+      clearClientCache();
       setUser(null);
     } finally {
       setIsLoading(false);
@@ -57,6 +59,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refreshUser]);
 
   const login = async (input: LoginInput): Promise<void> => {
+    clearClientCache();
     const res = await apiClient<AuthResponseData>('/auth/login', {
       method: 'POST',
       body: input,
@@ -67,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const register = async (input: RegisterInput): Promise<void> => {
+    clearClientCache();
     const res = await apiClient<AuthResponseData>('/auth/register', {
       method: 'POST',
       body: input,
@@ -78,12 +82,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async (): Promise<void> => {
     try {
+      clearClientCache();
       await apiClient('/auth/logout', {
         method: 'POST',
       });
     } catch {
       // Proceed with clearing local state even if logout request fails
     } finally {
+      clearClientCache();
       setUser(null);
     }
   };

@@ -1,8 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { ItineraryService } from './itinerary.service';
 import { TripsService } from './trips.service';
+
+import { GeocodingService } from '../geocoding/geocoding.service';
 
 describe('ItineraryService', () => {
   let service: ItineraryService;
@@ -96,6 +98,7 @@ describe('ItineraryService', () => {
         ItineraryService,
         { provide: TripsService, useValue: tripsService },
         { provide: PrismaService, useValue: prisma },
+        { provide: GeocodingService, useValue: { geocode: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 
@@ -261,6 +264,105 @@ describe('ItineraryService', () => {
 
       expect(prisma.$transaction).toHaveBeenCalled();
       expect(result).toHaveLength(2);
+    });
+  });
+
+  describe('geocodeUnmappedActivities', () => {
+    it('should return 0 resolved when all activities already have coordinates', async () => {
+      prisma.itineraryDay.findMany.mockResolvedValue([
+        {
+          ...mockDay,
+          activities: [{ ...mockActivity, latitude: 35.0116, longitude: 135.7681 }],
+        },
+      ]);
+
+      const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
+
+      expect(result.resolvedCount).toBe(0);
+      expect(result.unmappedCount).toBe(0);
+      expect(result.activities).toHaveLength(0);
+    });
+
+    it('should resolve coordinates for unmapped activities', async () => {
+      prisma.itineraryDay.findMany.mockResolvedValue([
+        {
+          ...mockDay,
+          activities: [
+            {
+              ...mockActivity,
+              id: 'act-unmapped-1',
+              title: 'Gion Corner',
+              location: 'Gion, Kyoto',
+              latitude: null,
+              longitude: null,
+            },
+          ],
+        },
+      ]);
+
+      const geocodingService = (service as any).geocodingService;
+      geocodingService.geocode.mockResolvedValueOnce([
+        { latitude: 35.0037, longitude: 135.7772, displayName: 'Gion Corner' },
+      ]);
+
+      prisma.activity.update.mockResolvedValueOnce({
+        ...mockActivity,
+        id: 'act-unmapped-1',
+        title: 'Gion Corner',
+        location: 'Gion, Kyoto',
+        latitude: 35.0037,
+        longitude: 135.7772,
+      });
+
+      const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
+
+      expect(result.resolvedCount).toBe(1);
+      expect(result.unmappedCount).toBe(0);
+      expect(result.activities).toHaveLength(1);
+      expect(result.activities[0].latitude).toBe(35.0037);
+      expect(result.activities[0].longitude).toBe(135.7772);
+      expect(prisma.activity.update).toHaveBeenCalledWith({
+        where: { id: 'act-unmapped-1' },
+        data: { latitude: 35.0037, longitude: 135.7772 },
+      });
+    });
+
+    it('should reject unauthorized users who do not have access to the trip', async () => {
+      tripsService.validateTripAccess.mockRejectedValueOnce(
+        new ForbiddenException('You do not have permission to access or modify this trip.'),
+      );
+
+      await expect(
+        service.geocodeUnmappedActivities('unauthorized-user', 'trip-1'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should handle geocoding failures gracefully without throwing and leave failed activities unmapped', async () => {
+      prisma.itineraryDay.findMany.mockResolvedValue([
+        {
+          ...mockDay,
+          activities: [
+            {
+              ...mockActivity,
+              id: 'act-unmapped-fail',
+              title: 'Unknown Secret Spot',
+              location: 'Nowhere',
+              latitude: null,
+              longitude: null,
+            },
+          ],
+        },
+      ]);
+
+      const geocodingService = (service as any).geocodingService;
+      geocodingService.geocode.mockRejectedValueOnce(new Error('Nominatim timeout'));
+
+      const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
+
+      expect(result.resolvedCount).toBe(0);
+      expect(result.unmappedCount).toBe(1);
+      expect(result.activities).toHaveLength(0);
+      expect(prisma.activity.update).not.toHaveBeenCalled();
     });
   });
 });

@@ -48,6 +48,8 @@ export interface ItineraryMapProps {
   height?: string | number;
   className?: string;
   filterToActiveDay?: boolean;
+  onGeocodeUnmapped?: () => void;
+  isGeocodingUnmapped?: boolean;
 }
 
 /**
@@ -147,11 +149,14 @@ export function ItineraryMap({
   height = '500px',
   className = '',
   filterToActiveDay = false,
+  onGeocodeUnmapped,
+  isGeocodingUnmapped = false,
 }: ItineraryMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapInstanceRef = useRef<LeafletType.Map | null>(null);
   const markersLayerRef = useRef<LeafletType.LayerGroup | null>(null);
   const routesLayerRef = useRef<LeafletType.LayerGroup | null>(null);
+  const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
   // Map view filtering state: 'ALL' or specific day ID
   const [dayFilter, setDayFilter] = useState<string>('ALL');
@@ -276,6 +281,17 @@ export function ItineraryMap({
       markersLayerRef.current = markersLayer;
       mapInstanceRef.current = map;
 
+      // Listen to resize events to automatically call map.invalidateSize()
+      if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+        const ro = new ResizeObserver(() => {
+          if (mapInstanceRef.current) {
+            mapInstanceRef.current.invalidateSize();
+          }
+        });
+        ro.observe(containerRef.current);
+        resizeObserverRef.current = ro;
+      }
+
       // Initial render of markers and routes
       renderLayers(L, map, markersLayer, routesLayer);
     }
@@ -284,6 +300,10 @@ export function ItineraryMap({
 
     return () => {
       isCancelled = true;
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current = null;
+      }
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
@@ -640,6 +660,26 @@ export function ItineraryMap({
                 Add geographic coordinates to your activities in the day planner to visualize daily route polylines and numbered stops in {destinationName}.
               </p>
             </div>
+            {onGeocodeUnmapped && mappedData.activitiesWithoutCoords > 0 && (
+              <button
+                type="button"
+                disabled={isGeocodingUnmapped}
+                onClick={onGeocodeUnmapped}
+                className="mt-2 w-full py-2.5 px-4 rounded-lg bg-accent text-surface text-xs font-semibold hover:bg-accent-hover transition-colors shadow-subtle flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {isGeocodingUnmapped ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-surface border-t-transparent rounded-full animate-spin" />
+                    <span>Locating Stops on Map...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Locate {mappedData.activitiesWithoutCoords} Unmapped Stop{mappedData.activitiesWithoutCoords === 1 ? '' : 's'}</span>
+                  </>
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -655,8 +695,18 @@ export function ItineraryMap({
           </span>
 
           {mappedData.activitiesWithoutCoords > 0 && (
-            <span className="text-secondary-text/80 hidden sm:inline">
-              ({mappedData.activitiesWithoutCoords} unmapped)
+            <span className="text-secondary-text/80 hidden sm:inline-flex items-center gap-1.5">
+              <span>({mappedData.activitiesWithoutCoords} unmapped)</span>
+              {onGeocodeUnmapped && (
+                <button
+                  type="button"
+                  disabled={isGeocodingUnmapped}
+                  onClick={onGeocodeUnmapped}
+                  className="text-[11px] font-semibold text-accent hover:underline disabled:opacity-50"
+                >
+                  {isGeocodingUnmapped ? 'Locating...' : 'Locate on map'}
+                </button>
+              )}
             </span>
           )}
 

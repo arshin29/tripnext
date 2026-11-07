@@ -118,27 +118,25 @@ export default function TripOverviewPage() {
         setEditCurrency((res.data.currency as Currency) || 'INR');
         setEditCoverImage(res.data.coverImage || '');
 
-        // Fetch members
-        const memRes = await apiClient<TripMember[]>(`/trips/${tripId}/members`);
-        if (memRes.data) {
-          setMembers(memRes.data);
+        // Populate members directly from trip response without extra roundtrip
+        if (res.data.members) {
+          setMembers(res.data.members);
         }
 
-        // Fetch pending invitations if owner
+        // Fetch pending invitations concurrently if owner
         const canManage =
           res.data.isOwner !== false &&
           (res.data.userId === user?.id || res.data.currentUserRole === 'OWNER');
         if (canManage) {
-          try {
-            const invRes = await apiClient<TripInvitation[]>(
-              `/trips/${tripId}/invitations`,
-            );
-            if (invRes.data) {
-              setPendingInvitations(invRes.data);
-            }
-          } catch {
-            // Member might not have permission
-          }
+          apiClient<TripInvitation[]>(`/trips/${tripId}/invitations`)
+            .then((invRes) => {
+              if (invRes.data) {
+                setPendingInvitations(invRes.data);
+              }
+            })
+            .catch(() => {
+              // Member might not have permission
+            });
         }
       } else {
         setError('Trip details could not be loaded.');

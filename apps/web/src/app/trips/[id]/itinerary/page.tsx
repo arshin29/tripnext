@@ -197,6 +197,7 @@ function ItineraryPlannerContent() {
   const [actLongitude, setActLongitude] = useState('');
   const [actCoordError, setActCoordError] = useState<string | null>(null);
   const [isGeocodingActivity, setIsGeocodingActivity] = useState(false);
+  const [isGeocodingUnmapped, setIsGeocodingUnmapped] = useState(false);
   const [actStartTime, setActStartTime] = useState('');
   const [actDuration, setActDuration] = useState('');
   const [actNotes, setActNotes] = useState('');
@@ -392,6 +393,31 @@ function ItineraryPlannerContent() {
       setActLongitude(String(tripDestinationCoords[1]));
       setActCoordError(null);
       showToast(`Filled destination coordinates for ${trip?.destination?.name || 'trip'}.`);
+    }
+  };
+
+  const handleGeocodeUnmappedActivities = async () => {
+    try {
+      setIsGeocodingUnmapped(true);
+      const res = await apiClient<{
+        resolvedCount: number;
+        unmappedCount: number;
+        message: string;
+      }>(`/trips/${tripId}/itinerary/geocode-activities`, {
+        method: 'POST',
+      });
+      if (res.data) {
+        if (res.data.resolvedCount > 0) {
+          showToast(`Located ${res.data.resolvedCount} stop(s) on the journey map!`);
+          await loadData();
+        } else {
+          showToast(res.data.message || 'All stops are already located on map.');
+        }
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to locate stops on map.');
+    } finally {
+      setIsGeocodingUnmapped(false);
     }
   };
 
@@ -1501,11 +1527,8 @@ function ItineraryPlannerContent() {
           {/* =====================================================================
               DESKTOP VIEW MODE 1: SPLIT VIEW (TIMELINE + STICKY MAP SIDE-BY-SIDE)
               ===================================================================== */}
-          <div
-            className={`hidden ${
-              itineraryLayoutMode === 'SPLIT' ? 'lg:grid' : 'hidden'
-            } grid-cols-12 gap-6 items-start`}
-          >
+          {itineraryLayoutMode === 'SPLIT' && (
+            <div className="hidden lg:grid grid-cols-12 gap-6 items-start">
             {/* Left Timeline Panel with Smooth Scroll */}
             <div className="col-span-12 lg:col-span-6 xl:col-span-5 space-y-4 max-h-[calc(100vh-140px)] overflow-y-auto pr-2">
               {/* Compact Day Selector Chips */}
@@ -1845,18 +1868,18 @@ function ItineraryPlannerContent() {
                 destinationName={trip?.destination?.name || trip?.title}
                 height="calc(100vh - 150px)"
                 className="min-h-[550px]"
+                onGeocodeUnmapped={handleGeocodeUnmappedActivities}
+                isGeocodingUnmapped={isGeocodingUnmapped}
               />
             </div>
           </div>
+          )}
 
           {/* =====================================================================
               DESKTOP VIEW MODE 2: LIST VIEW (TRADITIONAL 2-COLUMN TIMELINE)
               ===================================================================== */}
-          <div
-            className={`hidden ${
-              itineraryLayoutMode === 'LIST' ? 'lg:grid' : 'hidden'
-            } grid-cols-12 gap-8 items-start`}
-          >
+          {itineraryLayoutMode === 'LIST' && (
+            <div className="hidden lg:grid grid-cols-12 gap-8 items-start">
             {/* Left Day Navigator */}
             <div className="col-span-4 bg-surface border border-border rounded-xl p-4 shadow-subtle space-y-3 sticky top-8">
               <div className="flex items-center justify-between pb-3 border-b border-border">
@@ -2227,72 +2250,73 @@ function ItineraryPlannerContent() {
               )}
             </div>
           </div>
+          )}
 
           {/* =====================================================================
               DESKTOP VIEW MODE 3: FULL MAP VIEW
               ===================================================================== */}
-          <div
-            className={`hidden ${
-              itineraryLayoutMode === 'MAP' ? 'lg:block' : 'hidden'
-            } space-y-4`}
-          >
-            <DynamicItineraryMap
-              days={itineraryDays}
-              activeDayId={activeDayId}
-              onSelectDay={(dayId) => setActiveDayId(dayId)}
-              selectedActivityId={selectedActivityId}
-              onSelectActivity={handleSelectActivityOnMap}
-              hoveredActivityId={hoveredActivityId}
-              onHoverActivity={setHoveredActivityId}
-              suggestions={suggestions}
-              selectedSuggestionId={selectedSuggestionId}
-              onSelectSuggestion={setSelectedSuggestionId}
-              tripDestinationCoords={tripDestinationCoords}
-              destinationName={trip?.destination?.name || trip?.title}
-              height="calc(100vh - 220px)"
-              className="min-h-[600px] w-full"
-            />
+          {itineraryLayoutMode === 'MAP' && (
+            <div className="hidden lg:block space-y-4">
+              <DynamicItineraryMap
+                days={itineraryDays}
+                activeDayId={activeDayId}
+                onSelectDay={(dayId) => setActiveDayId(dayId)}
+                selectedActivityId={selectedActivityId}
+                onSelectActivity={handleSelectActivityOnMap}
+                hoveredActivityId={hoveredActivityId}
+                onHoverActivity={setHoveredActivityId}
+                suggestions={suggestions}
+                selectedSuggestionId={selectedSuggestionId}
+                onSelectSuggestion={setSelectedSuggestionId}
+                tripDestinationCoords={tripDestinationCoords}
+                destinationName={trip?.destination?.name || trip?.title}
+                height="calc(100vh - 220px)"
+                className="min-h-[600px] w-full"
+                onGeocodeUnmapped={handleGeocodeUnmappedActivities}
+                isGeocodingUnmapped={isGeocodingUnmapped}
+              />
 
-            {/* Quick Stop Navigator Bar for Map Mode */}
-            {activeDay && (
-              <div className="bg-surface border border-border rounded-xl p-4 shadow-subtle flex items-center justify-between gap-4">
-                <div className="flex items-center gap-3 overflow-x-auto py-1">
-                  <span
-                    style={{ color: getDayColor(activeDay.dayNumber) }}
-                    className="text-xs font-bold uppercase tracking-wider shrink-0"
-                  >
-                    Day {activeDay.dayNumber} Stops:
-                  </span>
-                  {(activeDay.activities || []).map((act, idx) => {
-                    const isSel = act.id === selectedActivityId;
-                    const hasCoords = act.latitude !== null && act.longitude !== null;
-                    return (
-                      <button
-                        key={act.id}
-                        type="button"
-                        onClick={() => handleSelectActivityOnMap(act.id)}
-                        className={`shrink-0 px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-2 transition-all ${
-                          isSel
-                            ? 'bg-accent text-surface border-accent shadow-xs'
-                            : 'bg-background hover:bg-surface border-border text-primary-text'
-                        }`}
-                      >
-                        <span className="font-bold text-[10px] w-4 h-4 rounded-full bg-black/10 flex items-center justify-center">
-                          {idx + 1}
-                        </span>
-                        <span className="truncate max-w-[140px]">{act.title}</span>
-                        {hasCoords ? (
-                          <Compass className="w-3 h-3 text-accent" />
-                        ) : (
-                          <span className="text-[9px] opacity-60">no pin</span>
-                        )}
-                      </button>
-                    );
-                  })}
+              {/* Quick Stop Navigator Bar for Map Mode */}
+              {activeDay && (
+                <div className="bg-surface border border-border rounded-xl p-4 shadow-subtle flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 overflow-x-auto py-1">
+                    <span
+                      style={{ color: getDayColor(activeDay.dayNumber) }}
+                      className="text-xs font-bold uppercase tracking-wider shrink-0"
+                    >
+                      Day {activeDay.dayNumber} Stops:
+                    </span>
+                    {(activeDay.activities || []).map((act, idx) => {
+                      const isSel = act.id === selectedActivityId;
+                      const hasCoords = act.latitude !== null && act.longitude !== null;
+                      return (
+                        <button
+                          key={act.id}
+                          type="button"
+                          onClick={() => handleSelectActivityOnMap(act.id)}
+                          className={`shrink-0 px-3 py-1.5 rounded-lg border text-xs font-medium flex items-center gap-2 transition-all ${
+                            isSel
+                              ? 'bg-accent text-surface border-accent shadow-xs'
+                              : 'bg-background hover:bg-surface border-border text-primary-text'
+                          }`}
+                        >
+                          <span className="font-bold text-[10px] w-4 h-4 rounded-full bg-black/10 flex items-center justify-center">
+                            {idx + 1}
+                          </span>
+                          <span className="truncate max-w-[140px]">{act.title}</span>
+                          {hasCoords ? (
+                            <Compass className="w-3 h-3 text-accent" />
+                          ) : (
+                            <span className="text-[9px] opacity-60">no pin</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          )}
 
           {/* =====================================================================
               MOBILE LAYOUT (LIST / MAP TOGGLE - NO CRAMPED SPLIT LAYOUT)
@@ -2358,6 +2382,8 @@ function ItineraryPlannerContent() {
                   destinationName={trip?.destination?.name || trip?.title}
                   height="460px"
                   className="w-full"
+                  onGeocodeUnmapped={handleGeocodeUnmappedActivities}
+                  isGeocodingUnmapped={isGeocodingUnmapped}
                 />
 
                 {/* Day Stops Summary below Mobile Map */}

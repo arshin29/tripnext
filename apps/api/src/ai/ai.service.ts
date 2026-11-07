@@ -21,6 +21,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { TripsService } from '../trips/trips.service';
 import { GenerateSuggestionsDto, ImportAiProposalsDto } from './dto';
 import { FallbackConciergeService } from './fallback-concierge.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
 
 interface GeneratedGeminiItem {
   dayNumber?: number;
@@ -56,6 +57,7 @@ export class AiService {
     private readonly configService: ConfigService,
     private readonly tripsService: TripsService,
     private readonly fallbackConciergeService: FallbackConciergeService,
+    private readonly geocodingService: GeocodingService,
   ) {
     const apiKey = this.configService.get<string>('geminiApiKey');
     this.modelName =
@@ -432,7 +434,52 @@ Guidelines:
       new Set(dto.proposals.map((p) => p.itineraryDayId)),
     ).sort();
 
-    // 4. Perform atomic batch creation via Prisma transaction with row-level locking
+    // 4. Resolve missing coordinates before opening database transaction to avoid timeout
+    const destinationHint = [trip.destination?.city, trip.destination?.country]
+      .filter(Boolean)
+      .join(', ');
+
+    const enrichedProposals = await Promise.all(
+      dto.proposals.map(async (proposal) => {
+        if (
+          proposal.latitude !== undefined &&
+          proposal.latitude !== null &&
+          proposal.longitude !== undefined &&
+          proposal.longitude !== null
+        ) {
+          return proposal;
+        }
+
+        const query = proposal.location?.trim() || proposal.title?.trim();
+        if (!query) return proposal;
+
+        try {
+          let results = await this.geocodingService.geocode(query, destinationHint);
+          if (
+            results.length === 0 &&
+            proposal.location?.trim() &&
+            proposal.title?.trim() &&
+            proposal.location.trim().toLowerCase() !== proposal.title.trim().toLowerCase()
+          ) {
+            results = await this.geocodingService.geocode(proposal.title.trim(), destinationHint);
+          }
+
+          if (results.length > 0) {
+            return {
+              ...proposal,
+              latitude: results[0].latitude,
+              longitude: results[0].longitude,
+            };
+          }
+        } catch (err: any) {
+          this.logger.warn(`Failed to auto-geocode proposal "${query}": ${err.message}`);
+        }
+
+        return proposal;
+      }),
+    );
+
+    // 5. Perform atomic batch creation via Prisma transaction with row-level locking
     return await this.prisma.$transaction(async (tx) => {
       // Acquire row-level locks on targeted itinerary_days rows to guarantee concurrency safety
       if (sortedTargetDayIds.length > 0) {
@@ -475,7 +522,7 @@ Guidelines:
       const importedActivities: Activity[] = [];
       let skippedCount = 0;
 
-      for (const proposal of dto.proposals) {
+      for (const proposal of enrichedProposals) {
         const daySet = titlesByDay.get(proposal.itineraryDayId)!;
         const normalizedTitle = proposal.title.trim().toLowerCase();
 

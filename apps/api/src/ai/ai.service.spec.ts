@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Test, TestingModule } from '@nestjs/testing';
 import { PrismaService } from '../prisma/prisma.service';
 import { TripsService } from '../trips/trips.service';
+import { GeocodingService } from '../geocoding/geocoding.service';
 import { AiService } from './ai.service';
 import { FallbackConciergeService } from './fallback-concierge.service';
 
@@ -125,6 +126,7 @@ describe('AiService', () => {
         { provide: ConfigService, useValue: configService },
         { provide: TripsService, useValue: tripsService },
         { provide: FallbackConciergeService, useValue: fallbackService },
+        { provide: GeocodingService, useValue: { geocode: jest.fn().mockResolvedValue([]) } },
       ],
     }).compile();
 
@@ -244,6 +246,7 @@ describe('AiService', () => {
           { provide: ConfigService, useValue: configService },
           { provide: TripsService, useValue: tripsService },
           { provide: FallbackConciergeService, useValue: fallbackService },
+          { provide: GeocodingService, useValue: { geocode: jest.fn().mockResolvedValue([]) } },
         ],
       }).compile();
 

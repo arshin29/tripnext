@@ -174,6 +174,29 @@ export class TripsController {
   }
 
   /**
+   * Safe, authenticated batch geocoding for unmapped activities in a trip itinerary.
+   */
+  @Post(':id/itinerary/geocode-activities')
+  @HttpCode(HttpStatus.OK)
+  async geocodeItineraryActivities(
+    @CurrentUser('id') userId: string,
+    @Param('id') tripId: string,
+  ): Promise<
+    ApiResponse<{
+      resolvedCount: number;
+      unmappedCount: number;
+      activities: Activity[];
+    }>
+  > {
+    const data = await this.itineraryService.geocodeUnmappedActivities(userId, tripId);
+    return {
+      success: true,
+      message: `Geocoded ${data.resolvedCount} activit${data.resolvedCount === 1 ? 'y' : 'ies'}.`,
+      data,
+    };
+  }
+
+  /**
    * Add an itinerary day to a trip (Owner only).
    */
   @Post(':id/itinerary/days')

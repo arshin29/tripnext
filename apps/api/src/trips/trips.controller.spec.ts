@@ -51,6 +51,9 @@ describe('TripsController', () => {
       deleteActivity: jest.fn().mockResolvedValue({ success: true, activityId: 'act-1' }),
       toggleComplete: jest.fn().mockResolvedValue({ id: 'act-1', isCompleted: true }),
       reorderActivities: jest.fn().mockResolvedValue([]),
+      geocodeUnmappedActivities: jest
+        .fn()
+        .mockResolvedValue({ resolvedCount: 1, unmappedCount: 0, activities: [] }),
     };
 
     collaborationService = {
@@ -139,5 +142,12 @@ describe('TripsController', () => {
     const result = await controller.toggleComplete('user-1', 'trip-1', 'act-1');
     expect(result.success).toBe(true);
     expect(result.data?.isCompleted).toBe(true);
+  });
+
+  it('should geocode unmapped itinerary activities', async () => {
+    const result = await controller.geocodeItineraryActivities('user-1', 'trip-1');
+    expect(result.success).toBe(true);
+    expect(result.data?.resolvedCount).toBe(1);
+    expect(itineraryService.geocodeUnmappedActivities).toHaveBeenCalledWith('user-1', 'trip-1');
   });
 });
