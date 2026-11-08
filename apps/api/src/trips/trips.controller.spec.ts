@@ -53,7 +53,7 @@ describe('TripsController', () => {
       reorderActivities: jest.fn().mockResolvedValue([]),
       geocodeUnmappedActivities: jest
         .fn()
-        .mockResolvedValue({ resolvedCount: 1, unmappedCount: 0, activities: [] }),
+        .mockResolvedValue({ totalAttempted: 1, resolvedCount: 1, unmappedCount: 0, activities: [] }),
     };
 
     collaborationService = {

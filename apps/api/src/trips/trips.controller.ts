@@ -183,15 +183,27 @@ export class TripsController {
     @Param('id') tripId: string,
   ): Promise<
     ApiResponse<{
+      totalAttempted: number;
       resolvedCount: number;
       unmappedCount: number;
       activities: Activity[];
     }>
   > {
     const data = await this.itineraryService.geocodeUnmappedActivities(userId, tripId);
+    let message: string;
+    if (data.totalAttempted === 0) {
+      message = 'All stops are already mapped.';
+    } else if (data.resolvedCount === data.totalAttempted) {
+      message = `Successfully mapped all ${data.resolvedCount} stops.`;
+    } else if (data.resolvedCount > 0) {
+      message = `Mapped ${data.resolvedCount} of ${data.totalAttempted} stops. ${data.unmappedCount} could not be located.`;
+    } else {
+      message = `Could not locate coordinates for ${data.totalAttempted} stop(s). You can add coordinates manually in the day planner.`;
+    }
+
     return {
       success: true,
-      message: `Geocoded ${data.resolvedCount} activit${data.resolvedCount === 1 ? 'y' : 'ies'}.`,
+      message,
       data,
     };
   }

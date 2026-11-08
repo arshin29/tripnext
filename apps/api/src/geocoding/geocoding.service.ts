@@ -58,6 +58,62 @@ export class GeocodingService {
   }
 
   /**
+   * Build a clean, high-precision search query for Nominatim by:
+   * 1. Removing itinerary prefixes (e.g. "Day 1 - ") and parenthetical translations (e.g. "(Golden Pavilion)")
+   * 2. Removing compound landmarks after &, /, or spaced hyphens (e.g. " & Champ de Mars")
+   * 3. Removing descriptive fluff words that Nominatim does not index (e.g. "Geisha District", "Tech District")
+   * 4. Deduplicating city and country tokens so queries don't end up with "Kyoto Kyoto, Japan"
+   */
+  public cleanQuery(rawQuery: string, contextHint?: string): string {
+    let cleaned = (rawQuery || '').trim();
+    if (!cleaned) return '';
+
+    // Strip day prefixes: "Day 1 - ", "Day 2: "
+    cleaned = cleaned.replace(/^day\s*\d+\s*[-:]\s*/i, '');
+
+    // Strip parenthetical content: " (Golden Pavilion)"
+    cleaned = cleaned.replace(/\s*\([^)]*\)/g, '');
+
+    // Strip trailing compound landmark separators: " & ...", " / ...", " - ..."
+    cleaned = cleaned.replace(/\s*&.*$/, '');
+    cleaned = cleaned.replace(/\s*\/.*$/, '');
+    cleaned = cleaned.replace(/\s+[-–—]\s+.*$/, '');
+
+    // Strip common itinerary action prefixes: "Visit to ", "Tour of ", "Explore "
+    cleaned = cleaned.replace(
+      /^(?:visit\s+(?:to\s+)?|tour\s+(?:of\s+)?|explore\s+|discover\s+|walk\s+through\s+)/i,
+      '',
+    );
+
+    // Strip descriptive suffix tags that often fail in Nominatim
+    cleaned = cleaned.replace(
+      /\s+(?:tech\s+district|geisha\s+district|historic\s+district|shopping\s+district|walking\s+tour|city\s+center)/i,
+      '',
+    );
+
+    cleaned = cleaned.trim();
+
+    // If contextHint is provided, append non-duplicate components
+    if (contextHint && contextHint.trim()) {
+      const hintTokens = contextHint
+        .split(',')
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0);
+
+      const lowerCleaned = cleaned.toLowerCase();
+      const tokensToAdd = hintTokens.filter(
+        (token) => !lowerCleaned.includes(token.toLowerCase()),
+      );
+
+      if (tokensToAdd.length > 0) {
+        return `${cleaned}, ${tokensToAdd.join(', ')}`;
+      }
+    }
+
+    return cleaned;
+  }
+
+  /**
    * Execute or queue a geocoding search with server-side caching and rate limiting.
    */
   async geocode(query: string, contextHint?: string): Promise<GeocodeResult[]> {
@@ -66,8 +122,11 @@ export class GeocodingService {
       return [];
     }
 
-    const trimmedHint = (contextHint || '').trim();
-    const fullQuery = trimmedHint ? `${trimmed} ${trimmedHint}` : trimmed;
+    const fullQuery = this.cleanQuery(trimmed, contextHint);
+    if (!fullQuery || fullQuery.length < 2) {
+      return [];
+    }
+
     const cacheKey = this.normalizeQuery(fullQuery);
 
     // 1. Immediate cache check: avoid queuing if result is already in memory
@@ -100,7 +159,16 @@ export class GeocodingService {
           this.lastRequestTime = Date.now();
 
           // Execute remote Nominatim call with timeout
-          const results = await this.fetchFromNominatim(fullQuery);
+          let results = await this.fetchFromNominatim(fullQuery);
+
+          // Fallback: if cleaned query returned 0 results and differs from raw query with hint
+          if (results.length === 0) {
+            const rawHint = (contextHint || '').trim();
+            const rawFallback = rawHint ? `${trimmed} ${rawHint}` : trimmed;
+            if (this.normalizeQuery(rawFallback) !== cacheKey) {
+              results = await this.fetchFromNominatim(rawFallback);
+            }
+          }
 
           // Store in cache
           this.cache.set(cacheKey, {

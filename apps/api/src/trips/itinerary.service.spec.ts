@@ -278,6 +278,7 @@ describe('ItineraryService', () => {
 
       const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
 
+      expect(result.totalAttempted).toBe(0);
       expect(result.resolvedCount).toBe(0);
       expect(result.unmappedCount).toBe(0);
       expect(result.activities).toHaveLength(0);
@@ -316,6 +317,7 @@ describe('ItineraryService', () => {
 
       const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
 
+      expect(result.totalAttempted).toBe(1);
       expect(result.resolvedCount).toBe(1);
       expect(result.unmappedCount).toBe(0);
       expect(result.activities).toHaveLength(1);
@@ -325,6 +327,102 @@ describe('ItineraryService', () => {
         where: { id: 'act-unmapped-1' },
         data: { latitude: 35.0037, longitude: 135.7772 },
       });
+    });
+
+    it('should accurately process seven unmapped activities and update all resolved records', async () => {
+      const sevenStops = [
+        { id: 'act-1', title: 'Kinkaku-ji (Golden Pavilion)', location: 'Kinkaku-ji (Golden Pavilion), Kyoto' },
+        { id: 'act-2', title: 'Gion Geisha District', location: 'Gion, Kyoto' },
+        { id: 'act-3', title: 'Fushimi Inari Shrine', location: 'Fushimi Inari, Kyoto' },
+        { id: 'act-4', title: 'Arashiyama Bamboo Grove', location: 'Arashiyama, Kyoto' },
+        { id: 'act-5', title: 'Kiyomizu-dera Temple', location: 'Kiyomizu-dera, Kyoto' },
+        { id: 'act-6', title: 'Nijo Castle', location: 'Nijo Castle, Kyoto' },
+        { id: 'act-7', title: 'Nishiki Market', location: 'Nishiki Market, Kyoto' },
+      ];
+
+      prisma.itineraryDay.findMany.mockResolvedValue([
+        {
+          ...mockDay,
+          activities: sevenStops.map((stop, idx) => ({
+            ...mockActivity,
+            id: stop.id,
+            title: stop.title,
+            location: stop.location,
+            latitude: null,
+            longitude: null,
+            sortOrder: idx,
+          })),
+        },
+      ]);
+
+      const geocodingService = (service as any).geocodingService;
+      sevenStops.forEach((_, idx) => {
+        geocodingService.geocode.mockResolvedValueOnce([
+          { latitude: 35.0 + idx * 0.01, longitude: 135.7 + idx * 0.01, displayName: `Stop ${idx}` },
+        ]);
+        prisma.activity.update.mockResolvedValueOnce({
+          ...mockActivity,
+          id: `act-${idx + 1}`,
+          latitude: 35.0 + idx * 0.01,
+          longitude: 135.7 + idx * 0.01,
+        });
+      });
+
+      const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
+
+      expect(result.totalAttempted).toBe(7);
+      expect(result.resolvedCount).toBe(7);
+      expect(result.unmappedCount).toBe(0);
+      expect(result.activities).toHaveLength(7);
+      expect(prisma.activity.update).toHaveBeenCalledTimes(7);
+    });
+
+    it('should correctly report partial success when some of the seven stops fail to geocode', async () => {
+      const sevenStops = Array.from({ length: 7 }, (_, i) => ({
+        id: `act-${i + 1}`,
+        title: `Stop ${i + 1}`,
+        location: `Location ${i + 1}`,
+      }));
+
+      prisma.itineraryDay.findMany.mockResolvedValue([
+        {
+          ...mockDay,
+          activities: sevenStops.map((stop) => ({
+            ...mockActivity,
+            id: stop.id,
+            title: stop.title,
+            location: stop.location,
+            latitude: null,
+            longitude: null,
+          })),
+        },
+      ]);
+
+      const geocodingService = (service as any).geocodingService;
+      // 4 succeed, 3 fail
+      for (let i = 0; i < 7; i++) {
+        if (i < 4) {
+          geocodingService.geocode.mockResolvedValueOnce([
+            { latitude: 35.0 + i * 0.01, longitude: 135.7 + i * 0.01, displayName: `Stop ${i}` },
+          ]);
+          prisma.activity.update.mockResolvedValueOnce({
+            ...mockActivity,
+            id: `act-${i + 1}`,
+            latitude: 35.0 + i * 0.01,
+            longitude: 135.7 + i * 0.01,
+          });
+        } else {
+          geocodingService.geocode.mockResolvedValueOnce([]);
+        }
+      }
+
+      const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
+
+      expect(result.totalAttempted).toBe(7);
+      expect(result.resolvedCount).toBe(4);
+      expect(result.unmappedCount).toBe(3);
+      expect(result.activities).toHaveLength(4);
+      expect(prisma.activity.update).toHaveBeenCalledTimes(4);
     });
 
     it('should reject unauthorized users who do not have access to the trip', async () => {
@@ -359,6 +457,7 @@ describe('ItineraryService', () => {
 
       const result = await service.geocodeUnmappedActivities('user-1', 'trip-1');
 
+      expect(result.totalAttempted).toBe(1);
       expect(result.resolvedCount).toBe(0);
       expect(result.unmappedCount).toBe(1);
       expect(result.activities).toHaveLength(0);

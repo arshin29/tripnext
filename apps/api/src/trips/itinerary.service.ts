@@ -3,7 +3,7 @@ import {
   Activity as PrismaActivity,
   ItineraryDay as PrismaItineraryDay,
 } from '@prisma/client';
-import { Activity, ItineraryDay } from '@tripnest/shared';
+import { Activity, GeocodeResult, ItineraryDay } from '@tripnest/shared';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CreateActivityDto,
@@ -277,28 +277,46 @@ export class ItineraryService {
     let lat = dto.latitude;
     let lng = dto.longitude;
 
+    const isCoordinateValid = (
+      cLat: number | null | undefined,
+      cLng: number | null | undefined,
+    ): boolean => {
+      return (
+        typeof cLat === 'number' &&
+        typeof cLng === 'number' &&
+        !isNaN(cLat) &&
+        !isNaN(cLng) &&
+        cLat >= -90 &&
+        cLat <= 90 &&
+        cLng >= -180 &&
+        cLng <= 180 &&
+        !(cLat === 0 && cLng === 0)
+      );
+    };
+
     // Automatic geocoding if coordinates are omitted but a usable location/title exists
-    if (lat === undefined && lng === undefined && (dto.location?.trim() || dto.title.trim())) {
+    if (!isCoordinateValid(lat, lng) && (dto.location?.trim() || dto.title.trim())) {
       const destinationHint = [trip?.destination?.city, trip?.destination?.country]
         .filter(Boolean)
         .join(', ');
-      const query = dto.location?.trim() || dto.title.trim();
-      try {
-        let results = await this.geocodingService.geocode(query, destinationHint);
-        if (
-          results.length === 0 &&
-          dto.location?.trim() &&
-          dto.title?.trim() &&
-          dto.location.trim().toLowerCase() !== dto.title.trim().toLowerCase()
-        ) {
-          results = await this.geocodingService.geocode(dto.title.trim(), destinationHint);
+
+      const candidates: string[] = [];
+      if (dto.location?.trim()) candidates.push(dto.location.trim());
+      if (dto.title?.trim() && !candidates.includes(dto.title.trim())) {
+        candidates.push(dto.title.trim());
+      }
+
+      for (const query of candidates) {
+        try {
+          const results = await this.geocodingService.geocode(query, destinationHint);
+          if (results.length > 0) {
+            lat = results[0].latitude;
+            lng = results[0].longitude;
+            break;
+          }
+        } catch {
+          // Fallback gracefully without throwing
         }
-        if (results.length > 0) {
-          lat = results[0].latitude;
-          lng = results[0].longitude;
-        }
-      } catch {
-        // Fallback gracefully without throwing
       }
     }
 
@@ -329,6 +347,7 @@ export class ItineraryService {
     userId: string,
     tripId: string,
   ): Promise<{
+    totalAttempted: number;
     resolvedCount: number;
     unmappedCount: number;
     activities: Activity[];
@@ -345,12 +364,29 @@ export class ItineraryService {
       orderBy: { dayNumber: 'asc' },
     });
 
+    const isCoordinateValid = (
+      lat: number | null | undefined,
+      lng: number | null | undefined,
+    ): boolean => {
+      return (
+        typeof lat === 'number' &&
+        typeof lng === 'number' &&
+        !isNaN(lat) &&
+        !isNaN(lng) &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lng >= -180 &&
+        lng <= 180 &&
+        !(lat === 0 && lng === 0)
+      );
+    };
+
     const unmapped = days
       .flatMap((d) => d.activities)
-      .filter((a) => a.latitude === null || a.longitude === null);
+      .filter((a) => !isCoordinateValid(a.latitude, a.longitude));
 
     if (unmapped.length === 0) {
-      return { resolvedCount: 0, unmappedCount: 0, activities: [] };
+      return { totalAttempted: 0, resolvedCount: 0, unmappedCount: 0, activities: [] };
     }
 
     const destinationHint = [trip.destination?.city, trip.destination?.country]
@@ -360,21 +396,32 @@ export class ItineraryService {
     const resolvedActivities: Activity[] = [];
 
     for (const act of unmapped) {
-      const query = act.location?.trim() || act.title.trim();
-      if (!query) continue;
+      const candidates: string[] = [];
+      const trimmedLoc = act.location?.trim();
+      const trimmedTitle = act.title?.trim();
 
-      try {
-        let results = await this.geocodingService.geocode(query, destinationHint);
-        if (
-          results.length === 0 &&
-          act.location?.trim() &&
-          act.title.trim() &&
-          act.location.trim().toLowerCase() !== act.title.trim().toLowerCase()
-        ) {
-          results = await this.geocodingService.geocode(act.title.trim(), destinationHint);
+      if (trimmedLoc) candidates.push(trimmedLoc);
+      if (trimmedTitle && !candidates.includes(trimmedTitle)) {
+        candidates.push(trimmedTitle);
+      }
+
+      if (candidates.length === 0) continue;
+
+      let results: GeocodeResult[] = [];
+
+      for (const query of candidates) {
+        try {
+          results = await this.geocodingService.geocode(query, destinationHint);
+          if (results.length > 0) {
+            break;
+          }
+        } catch {
+          // Graceful fallback to next candidate
         }
+      }
 
-        if (results.length > 0) {
+      if (results.length > 0) {
+        try {
           const updated = await this.prisma.activity.update({
             where: { id: act.id },
             data: {
@@ -383,13 +430,14 @@ export class ItineraryService {
             },
           });
           resolvedActivities.push(this.toActivity(updated));
+        } catch {
+          // Graceful error handling
         }
-      } catch {
-        // Graceful error handling per activity
       }
     }
 
     return {
+      totalAttempted: unmapped.length,
       resolvedCount: resolvedActivities.length,
       unmappedCount: unmapped.length - resolvedActivities.length,
       activities: resolvedActivities,

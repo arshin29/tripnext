@@ -400,18 +400,29 @@ function ItineraryPlannerContent() {
     try {
       setIsGeocodingUnmapped(true);
       const res = await apiClient<{
+        totalAttempted: number;
         resolvedCount: number;
         unmappedCount: number;
-        message: string;
+        activities: Activity[];
       }>(`/trips/${tripId}/itinerary/geocode-activities`, {
         method: 'POST',
       });
-      if (res.data) {
-        if (res.data.resolvedCount > 0) {
-          showToast(`Located ${res.data.resolvedCount} stop(s) on the journey map!`);
+
+      if (res) {
+        const data = res.data;
+        const resolved = data?.resolvedCount ?? 0;
+        const total = data?.totalAttempted ?? 0;
+
+        if (resolved > 0) {
+          showToast(res.message || `Located ${resolved} stop(s) on the journey map!`);
           await loadData();
+        } else if (total === 0) {
+          showToast(res.message || 'All stops are already located on the map.');
         } else {
-          showToast(res.data.message || 'All stops are already located on map.');
+          showToast(
+            res.message ||
+              `Could not locate coordinates for ${total} stop(s). You can add coordinates manually in the day planner.`,
+          );
         }
       }
     } catch (err: any) {

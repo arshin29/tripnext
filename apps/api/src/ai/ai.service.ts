@@ -441,38 +441,44 @@ Guidelines:
 
     const enrichedProposals = await Promise.all(
       dto.proposals.map(async (proposal) => {
-        if (
-          proposal.latitude !== undefined &&
-          proposal.latitude !== null &&
-          proposal.longitude !== undefined &&
-          proposal.longitude !== null
-        ) {
+        const isValidCoord = (
+          lat: number | null | undefined,
+          lng: number | null | undefined,
+        ): boolean =>
+          typeof lat === 'number' &&
+          typeof lng === 'number' &&
+          !isNaN(lat) &&
+          !isNaN(lng) &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lng >= -180 &&
+          lng <= 180 &&
+          !(lat === 0 && lng === 0);
+
+        if (isValidCoord(proposal.latitude, proposal.longitude)) {
           return proposal;
         }
 
-        const query = proposal.location?.trim() || proposal.title?.trim();
-        if (!query) return proposal;
+        const candidates: string[] = [];
+        const loc = proposal.location?.trim();
+        const title = proposal.title?.trim();
+        if (loc) candidates.push(loc);
+        if (title && !candidates.includes(title)) candidates.push(title);
+        if (candidates.length === 0) return proposal;
 
-        try {
-          let results = await this.geocodingService.geocode(query, destinationHint);
-          if (
-            results.length === 0 &&
-            proposal.location?.trim() &&
-            proposal.title?.trim() &&
-            proposal.location.trim().toLowerCase() !== proposal.title.trim().toLowerCase()
-          ) {
-            results = await this.geocodingService.geocode(proposal.title.trim(), destinationHint);
+        for (const query of candidates) {
+          try {
+            const results = await this.geocodingService.geocode(query, destinationHint);
+            if (results.length > 0) {
+              return {
+                ...proposal,
+                latitude: results[0].latitude,
+                longitude: results[0].longitude,
+              };
+            }
+          } catch (err: any) {
+            this.logger.warn(`Failed to auto-geocode proposal "${query}": ${err.message}`);
           }
-
-          if (results.length > 0) {
-            return {
-              ...proposal,
-              latitude: results[0].latitude,
-              longitude: results[0].longitude,
-            };
-          }
-        } catch (err: any) {
-          this.logger.warn(`Failed to auto-geocode proposal "${query}": ${err.message}`);
         }
 
         return proposal;

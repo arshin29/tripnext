@@ -41,6 +41,31 @@ describe('GeocodingService', () => {
     });
   });
 
+  describe('cleanQuery', () => {
+    it('should remove parenthetical content and deduplicate context tokens', () => {
+      const q1 = service.cleanQuery('Kinkaku-ji (Golden Pavilion), Kyoto', 'Kyoto, Japan');
+      expect(q1).toBe('Kinkaku-ji, Kyoto, Japan');
+    });
+
+    it('should remove ampersands and secondary compound landmarks', () => {
+      const q2 = service.cleanQuery('Eiffel Tower & Champ de Mars, Paris', 'Paris, France');
+      expect(q2).toBe('Eiffel Tower, Paris, France');
+    });
+
+    it('should remove descriptive fluff suffixes that hinder Nominatim lookups', () => {
+      const q3 = service.cleanQuery('Gion Geisha District, Kyoto', 'Kyoto, Japan');
+      expect(q3).toBe('Gion, Kyoto, Japan');
+
+      const q4 = service.cleanQuery('Akihabara Tech District, Tokyo', 'Tokyo, Japan');
+      expect(q4).toBe('Akihabara, Tokyo, Japan');
+    });
+
+    it('should strip day prefixes from itinerary titles', () => {
+      const q5 = service.cleanQuery('Day 1 - Senso-ji Temple', 'Tokyo, Japan');
+      expect(q5).toBe('Senso-ji Temple, Tokyo, Japan');
+    });
+  });
+
   describe('Caching Behavior', () => {
     it('should cache results and avoid duplicate upstream calls for identical queries', async () => {
       const mockFetch = jest.fn().mockResolvedValue({
